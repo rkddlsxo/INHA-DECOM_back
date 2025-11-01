@@ -29,6 +29,9 @@ def create_app():
     from app.routes.booking import booking_bp
     app.register_blueprint(booking_bp)
 
+    from app.routes.space import space_bp
+    app.register_blueprint(space_bp)
+
     from . import models
     with app.app_context():
         db.create_all()
