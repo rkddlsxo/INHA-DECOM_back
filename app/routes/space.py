@@ -2,7 +2,7 @@ from flask import Blueprint, jsonify, request
 from app import db
 from app.models import Space, Booking 
 import calendar 
-from sqlalchemy.sql import extract 
+from sqlalchemy.sql import extract, and_ 
 
 # 'space_bp' 라는 이름으로 블루프린트 생성
 space_bp = Blueprint('space', __name__, url_prefix='/api')
@@ -11,7 +11,6 @@ space_bp = Blueprint('space', __name__, url_prefix='/api')
 def get_all_10_min_slots():
     """
     07:00 부터 21:50 까지 10분 단위 시간표(총 89개 슬롯)를 생성합니다.
-   
     """
     slots = {}
     for h in range(7, 22): # 7시부터 21시
@@ -34,13 +33,10 @@ def _calculate_booked_slots_count(bookings_for_day, all_slots_template):
     
     for slot_time in time_slot_status:
         for booking in bookings_for_day:
-            # 10분 단위 슬롯(slot_time)이 예약 범위(start_time ~ end_time) 안에 있는지 확인
-            # (end_time은 포함하지 않음. 10:59 종료는 10:50 슬롯까지만 포함)
             if slot_time >= booking.start_time and slot_time < booking.end_time:
-                time_slot_status[slot_time] = False # 예약됨으로 표시
-                break # 이 슬롯은 False로 확정, 다음 슬롯 검사
+                time_slot_status[slot_time] = False 
+                break 
     
-    # False (예약됨)로 표시된 슬롯의 개수를 셈
     booked_count = sum(1 for status in time_slot_status.values() if not status)
     return booked_count
 
@@ -65,7 +61,7 @@ def get_master_spaces():
         return jsonify({"error": "장소 목록 조회 중 오류 발생", "details": str(e)}), 500
 
 
-# --- API 2: 월별 현황 (심화 방안 적용) ---
+# --- API 2: 월별 현황 (달력) ---
 @space_bp.route("/availability/monthly", methods=['GET'])
 def get_monthly_availability():
     try:
@@ -78,13 +74,11 @@ def get_monthly_availability():
         return jsonify({"error": "잘못된 파라미터 타입입니다."}), 400
 
     try:
-        # 1. 10분 슬롯 템플릿과 총 슬롯 개수를 미리 계산 (총 89개)
         all_slots_template = get_all_10_min_slots()
         total_slots_count = len(all_slots_template)
-        if total_slots_count == 0: # 0으로 나누기 방지
+        if total_slots_count == 0:
              return jsonify({"error": "슬롯 계산 오류"}), 500
 
-        # 2. DB에서 해당 월의 모든 예약을 '한 번에' 가져옴
         bookings_in_month = Booking.query.filter(
             Booking.space_id == room_id,
             extract('year', Booking.date) == year,
@@ -92,7 +86,6 @@ def get_monthly_availability():
             Booking.status != '취소'
         ).all()
 
-        # 3. 날짜별로 예약 목록을 재그룹화 (Python Dictionary 사용)
         bookings_by_day = {}
         for b in bookings_in_month:
             date_key = str(b.date)
@@ -100,18 +93,14 @@ def get_monthly_availability():
                 bookings_by_day[date_key] = []
             bookings_by_day[date_key].append(b)
 
-        # 4. 프론트엔드에 보낼 데이터 가공
         availability_data = {}
         num_days_in_month = calendar.monthrange(year, month)[1]
 
         for day in range(1, num_days_in_month + 1):
             date_key = f"{year}-{str(month).zfill(2)}-{str(day).zfill(2)}"
-            
-            # 5. 해당 날짜의 예약 목록으로 예약된 슬롯 수 계산
             day_bookings = bookings_by_day.get(date_key, [])
             booked_count = _calculate_booked_slots_count(day_bookings, all_slots_template)
-
-            # 6. 상태와 비율(Percentage) 계산
+            
             percentage = 0.0
             status = "available"
             
@@ -123,7 +112,6 @@ def get_monthly_availability():
                 else:
                     status = "partial"
             
-            # 7. 'status'와 'percentage'를 함께 반환
             availability_data[date_key] = {
                 "status": status,
                 "percentage": percentage 
@@ -135,7 +123,7 @@ def get_monthly_availability():
         return jsonify({"error": "월별 현황 조회 중 오류 발생", "details": str(e)}), 500
 
 
-# --- API 3: 일별 현황 ---
+# --- API 3: 일별 현황 (시간표) ---
 @space_bp.route("/availability/daily", methods=['GET'])
 def get_daily_availability():
     try:
@@ -164,3 +152,58 @@ def get_daily_availability():
         return jsonify(time_slot_status), 200
     except Exception as e:
         return jsonify({"error": "일별 현황 조회 중 오류 발생", "details": str(e)}), 500
+
+
+# --- API 4: 시간 우선 예약 (사용 가능한 장소 조회) ---
+@space_bp.route("/spaces/available", methods=['GET'])
+def get_available_spaces_for_time():
+    try:
+        date = request.args.get('date', type=str)
+        start_time = request.args.get('start', type=str)
+        end_time = request.args.get('end', type=str)
+
+        if not all([date, start_time, end_time]):
+            return jsonify({"error": "date, start, end는 필수 파라미터입니다."}), 400
+        
+        if start_time >= end_time:
+            return jsonify({"error": "시작 시간은 종료 시간보다 빨라야 합니다."}), 400
+
+    except Exception as e:
+        return jsonify({"error": "잘못된 파라미터입니다.", "details": str(e)}), 400
+    
+    try:
+        # 1. 해당 시간에 겹치는 예약이 있는 space_id 목록을 찾음
+        conflicting_bookings_query = db.session.query(Booking.space_id)\
+            .filter(
+                Booking.date == date,
+                Booking.status != '취소',
+                and_(
+                    Booking.start_time < end_time,   # 요청 시작 < 예약 끝
+                    Booking.end_time > start_time    # 요청 끝 > 예약 시작
+                )
+            )\
+            .distinct()
+
+        conflicting_space_ids = [b[0] for b in conflicting_bookings_query.all()]
+
+        # 2. 이 목록에 '포함되지 않은' 모든 장소를 조회
+        available_spaces = Space.query.filter(
+            Space.id.notin_(conflicting_space_ids)
+        ).all()
+        
+        # 3. JSON으로 가공
+        results = []
+        for space in available_spaces:
+            results.append({
+                "id": space.id,
+                "name": space.name,
+                "category": space.category,
+                "subCategory": space.subCategory,
+                "location": space.location,
+                "capacity": space.capacity
+            })
+
+        return jsonify(results), 200
+
+    except Exception as e:
+        return jsonify({"error": "사용 가능한 장소 조회 중 오류 발생", "details": str(e)}), 500
