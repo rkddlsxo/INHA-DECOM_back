@@ -6,9 +6,43 @@ from flask_jwt_extended import create_access_token, jwt_required, get_jwt_identi
 
 auth_bp = Blueprint('auth', __name__, url_prefix='/api')
 
-# ... (회원가입 /register 코드는 그대로 둡니다) ...
+@auth_bp.route("/register", methods=['POST'])
+def register():
+    data = request.get_json()
+    user_id = data.get('id')
+    username = data.get('username')
+    password = data.get('password')
 
-#로그인
+    # 1. 프론트엔드 유효성 검사와 동일하게 백엔드에서도 검증
+    if not all([user_id, username, password]):
+        return jsonify({"error": "학번, 이름, 비밀번호는 필수입니다."}), 400
+
+    if len(user_id) != 8:
+        return jsonify({"error": "학번은 8자리여야 합니다."}), 400
+
+    # 2. 이미 존재하는 사용자인지 확인 (id 또는 username)
+    if User.query.filter_by(id=user_id).first():
+        return jsonify({"error": "이미 가입된 학번입니다."}), 409 # 409: Conflict
+
+    if User.query.filter_by(username=username).first():
+        return jsonify({"error": "이미 사용 중인 이름입니다."}), 409
+
+    # 3. 비밀번호 암호화 (bcrypt 사용)
+    hashed_password = bcrypt.generate_password_hash(password).decode('utf-8')
+    
+    # 4. 새 사용자 객체를 생성하여 DB에 저장
+    try:
+        new_user = User(id=user_id, username=username, password=hashed_password)
+        db.session.add(new_user)
+        db.session.commit()
+
+        return jsonify({"message": f"'{username}'님, 회원가입이 완료되었습니다."}), 201 # 201: Created
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": "DB 저장 중 오류가 발생했습니다.", "details": str(e)}), 500
+    
+    
 @auth_bp.route("/login", methods=['POST'])
 def login():
     """User login route."""
