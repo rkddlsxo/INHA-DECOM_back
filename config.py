@@ -4,5 +4,5 @@ class Config:
 
 
     # DB 설정
-    SQLALCHEMY_DATABASE_URI = 'mysql+pymysql://root:@localhost/decom'
+    SQLALCHEMY_DATABASE_URI = 'mysql+pymysql://decom_user:i12jjmmq@localhost/decom'
     SQLALCHEMY_TRACK_MODIFICATIONS = False

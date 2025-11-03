@@ -1,0 +1,9 @@
+# Python 
+__pycache__/
+*.pyc
+*.db
+venv/
+.env
+
+# (기타)
+.DS_Store

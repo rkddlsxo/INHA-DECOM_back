@@ -83,6 +83,9 @@ class Booking(db.Model):
     status = db.Column(db.String(20), nullable=False, default='확정대기') # 예: '확정대기', '확정', '취소'
     cancel_reason = db.Column(db.Text, nullable=True) # 취소 사유
 
+    # 체크인한 시간을 기록 (체크인 안 했으면 NULL로 체크인 여부 관리)
+    check_in_time = db.Column(db.DateTime, nullable=True, default=None)
+
     def __init__(self, user_id, space_id, date, start_time, end_time, organizationType, organizationName, phone, email, event_name, num_people, ac_use, status='확정대기'):
         self.user_id = user_id
         self.space_id = space_id
