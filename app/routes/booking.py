@@ -4,6 +4,7 @@ from app.models import Booking, Space
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from datetime import datetime, timedelta
 import pytz
+from geopy.distance import geodesic #위치 정보 가져오기 위해 geopy import
 
 # 'booking_bp' (booking blueprint) 라는 이름으로 새 블루프린트 생성
 booking_bp = Blueprint('booking', __name__, url_prefix='/api')
@@ -144,7 +145,9 @@ def update_booking(booking_id):
     except Exception as e:
         db.session.rollback()
         return jsonify({"error": "예약 수정 중 오류 발생", "details": str(e)}), 500
-    
+
+GPS_THRESHOLD_METERS = 50 #허용할 최대 반경 (ex: 50m)
+
 @booking_bp.route("/check-in", methods=['POST'])
 @jwt_required()
 def check_in_booking():
@@ -155,6 +158,13 @@ def check_in_booking():
         space_id = request.args.get('space_id', type=int)
         if not space_id:
             return jsonify({"error": "space_id가 필요합니다."}), 400
+        
+        #프론트엔드로부터 위치 정보 받아오기
+        user_lat = request.args.get('lat', type=float)
+        user_lng = request.args.get('lng', type=float)
+        if user_lat is None or user_lng is None:
+            return jsonify({"error": "GPS 위치 정보(lat, lng)가 필요합니다."}), 400
+        
     except ValueError:
         return jsonify({"error": "잘못된 space_id 형식입니다."}), 400
 
@@ -177,7 +187,24 @@ def check_in_booking():
         if not booking:
             return jsonify({"error": f"해당 장소({space_id})에 대한 예약 내역이 없습니다."}), 404
 
-        #3. 예약이 존재하므로, 상태 및 시간 검증
+        #3. 예약이 존재하므로, 위치(추가), 상태 및 시간 검증
+
+        space = booking.space # 예약된 장소의 Space 객체
+        
+        # 3-1. DB에 해당 장소의 좌표가 등록되어 있을 때만 검사
+        if space.latitude and space.longitude:
+            user_location = (user_lat, user_lng)
+            space_location = (space.latitude, space.longitude)
+            
+            # 3-2. geopy로 두 좌표 간의 거리(미터) 계산
+            distance = geodesic(user_location, space_location).meters
+            
+            # 3-3. 허용 반경(50m)을 벗어나면 에러 반환
+            if distance > GPS_THRESHOLD_METERS:
+                return jsonify({
+                    "error": "체크인 실패: 현재 위치가 예약 장소와 너무 멉니다.",
+                    "details": f"현재 거리: {int(distance)}m (허용 반경: {GPS_THRESHOLD_METERS}m)"
+                }), 403 # 403 Forbidden
 
         # [성공 1] 이미 체크인한 경우 (새로고침)
         # 오늘 날짜이고, 상태가 '이용중'이거나 check_in_time이 이미 기록됨

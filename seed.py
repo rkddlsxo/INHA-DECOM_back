@@ -1,5 +1,5 @@
 from app import create_app, db
-from app.models import Space
+from app.models import Space, Booking
 
 # 프론트엔드 코드(TimeFocusSelectPage.jsx)의 카테고리 분류를 따릅니다.
 # (카테고리: 서브카테고리)
@@ -12,7 +12,20 @@ CATEGORY_MAP = {
     '테니스 코드': '테니스 코드',
     '농구장': '농구장',
     '풋살파크': '풋살파크',
-    '피클볼 코드': '피클볼 코드',
+    '피클볼 코트': '피클볼 코트', #오타 수정
+}
+
+#서브카테고리별 좌표(위도, 경도) 매핑
+COORDINATE_MAP = {
+    '인문 스터디룸': (37.45078334666676, 126.653069856456),
+    '해동 스터디룸': (37.450674645592095, 126.65711628773977),
+    '학생라운지 스터디룸': (37.450493373251106, 126.6575239674216),
+    '가무연습실': (37.44945931699783, 126.65669662369501),
+    '운동장': (37.449810475130896, 126.65123081715912),
+    '테니스 코드': (37.44866610870164, 126.6512022264584),
+    '농구장': (37.45055049260407, 126.65163423390864),
+    '풋살파크': (37.44960675647723, 126.65165838766397),
+    '피클볼 코트': (37.450532528389985, 126.65088983381678)
 }
 
 # (이름, 서브카테고리, 위치, 기본 수용인원)
@@ -68,6 +81,10 @@ def initialize_spaces():
     app = create_app()
     with app.app_context():
         try:
+            #기존 Booking 데이터 또한 초기화 (Space에 dependency)
+            print("INFO: 기존 예약(Booking) 데이터를 모두 삭제합니다...")
+            db.session.query(Booking).delete()
+
             # 1. 기존의 모든 Space 데이터를 삭제 (초기화)
             print("INFO: 기존 장소(Space) 데이터를 모두 삭제합니다...")
             db.session.query(Space).delete()
@@ -77,12 +94,20 @@ def initialize_spaces():
             for name, sub_cat, loc, cap in spaces_data:
                 category = CATEGORY_MAP.get(sub_cat, '기타') # 맵에서 메인 카테고리 찾기
                 
+                # 좌표 찾기 추가
+                coords = COORDINATE_MAP.get(sub_cat)
+                lat, lng = (None, None)
+                if coords:
+                    lat, lng = coords
+
                 new_space = Space(
                     name=name,
                     category=category,
                     subCategory=sub_cat,
                     location=loc,
-                    capacity=cap
+                    capacity=cap,
+                    latitude=lat,     # 위도, 경도 전달
+                    longitude=lng
                 )
                 spaces_to_add.append(new_space)
             

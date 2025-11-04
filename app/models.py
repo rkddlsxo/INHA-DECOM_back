@@ -39,17 +39,21 @@ class Space(db.Model):
     subCategory = db.Column(db.String(100))                 # 예: "인문 스터디룸"
     location = db.Column(db.String(100))                    # 예: "60주년 501호"
     capacity = db.Column(db.Integer, nullable=False, default=1) # 수용 인원
+    latitude = db.Column(db.Float, nullable=True)           #위도 추가
+    longitude = db.Column(db.Float, nullable=True)          #경도 추가
     
     # ⭐️ Space가 삭제되면 관련 예약 내역도 삭제 (필요에 따라 정책 변경)
     bookings = db.relationship('Booking', backref='space', lazy=True, cascade="all, delete-orphan")
     complaints = db.relationship('Complaint', backref='space', lazy=True)
 
-    def __init__(self, name, category, subCategory, location, capacity):
+    def __init__(self, name, category, subCategory, location, capacity, latitude=None, longitude=None):
         self.name = name
         self.category = category
         self.subCategory = subCategory
         self.location = location
         self.capacity = capacity
+        self.latitude = latitude
+        self.longitude = longitude
 
 
 class Booking(db.Model):
