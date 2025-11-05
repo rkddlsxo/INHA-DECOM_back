@@ -3,6 +3,7 @@ from app import db
 from app.models import Space, Booking 
 import calendar 
 from sqlalchemy.sql import extract, and_ 
+from datetime import datetime, time # [수정] datetime, time import
 
 # 'space_bp' 라는 이름으로 블루프린트 생성
 space_bp = Blueprint('space', __name__, url_prefix='/api')
@@ -13,29 +14,39 @@ def get_all_10_min_slots():
     07:00 부터 21:50 까지 10분 단위 시간표(총 89개 슬롯)를 생성합니다.
     """
     slots = {}
-    for h in range(7, 22): # 7시부터 21시
-        for m in range(0, 60, 10): # 0분부터 50분까지 10분 간격
+    for h in range(7, 22): 
+        for m in range(0, 60, 10): 
             if h == 21 and m > 50:
                 break
             slot_key = f"{str(h).zfill(2)}:{str(m).zfill(2)}"
-            slots[slot_key] = True # 기본값: 예약 가능 (True)
+            slots[slot_key] = True 
     return slots
 
 # --- 헬퍼 함수 2 ---
 def _calculate_booked_slots_count(bookings_for_day, all_slots_template):
     """
     특정 날짜의 예약 리스트를 받아, 몇 개의 10분 슬롯이 찼는지 계산합니다.
+    (bookings_for_day의 예약은 time 객체를 가지고 있습니다)
     """
     if not bookings_for_day:
         return 0
     
-    time_slot_status = dict(all_slots_template) # 템플릿 복사
+    time_slot_status = dict(all_slots_template) # 템플릿 복사 (키: "07:00")
     
-    for slot_time in time_slot_status:
+    # --- [!!! 핵심 수정 !!!] ---
+    # 문자열 슬롯과 time 객체를 비교하기 위해, 슬롯 문자열을 time 객체로 변환하며 비교
+    for slot_time_str in time_slot_status:
+        try:
+            slot_time_obj = datetime.strptime(slot_time_str, '%H:%M').time()
+        except ValueError:
+            continue # 혹시 모를 잘못된 슬롯 형식 방지
+            
         for booking in bookings_for_day:
-            if slot_time >= booking.start_time and slot_time < booking.end_time:
-                time_slot_status[slot_time] = False 
+            # time 객체끼리 비교
+            if slot_time_obj >= booking.start_time and slot_time_obj < booking.end_time:
+                time_slot_status[slot_time_str] = False 
                 break 
+    # --- 수정 끝 ---
     
     booked_count = sum(1 for status in time_slot_status.values() if not status)
     return booked_count
@@ -79,6 +90,7 @@ def get_monthly_availability():
         if total_slots_count == 0:
              return jsonify({"error": "슬롯 계산 오류"}), 500
 
+        # [수정] extract는 Date 타입에도 잘 동작합니다. (변경 없음)
         bookings_in_month = Booking.query.filter(
             Booking.space_id == room_id,
             extract('year', Booking.date) == year,
@@ -88,7 +100,8 @@ def get_monthly_availability():
 
         bookings_by_day = {}
         for b in bookings_in_month:
-            date_key = str(b.date)
+            # [수정] date 객체를 isoformat() 문자열로 변환
+            date_key = b.date.isoformat()
             if date_key not in bookings_by_day:
                 bookings_by_day[date_key] = []
             bookings_by_day[date_key].append(b)
@@ -97,7 +110,10 @@ def get_monthly_availability():
         num_days_in_month = calendar.monthrange(year, month)[1]
 
         for day in range(1, num_days_in_month + 1):
-            date_key = f"{year}-{str(month).zfill(2)}-{str(day).zfill(2)}"
+            # [수정] date 객체를 만들고 isoformat() 문자열로 키 생성
+            date_obj = datetime(year, month, day).date()
+            date_key = date_obj.isoformat() 
+            
             day_bookings = bookings_by_day.get(date_key, [])
             booked_count = _calculate_booked_slots_count(day_bookings, all_slots_template)
             
@@ -128,25 +144,33 @@ def get_monthly_availability():
 def get_daily_availability():
     try:
         room_id = request.args.get('roomId', type=int)
-        date = request.args.get('date', type=str)
-        if not all([room_id, date]):
+        date_str = request.args.get('date', type=str) # _str 접미사
+        if not all([room_id, date_str]):
             return jsonify({"error": "roomId, date는 필수 파라미터입니다."}), 400
+        
+        # [수정] 문자열을 date 객체로 파싱
+        date_obj = datetime.strptime(date_str, '%Y-%m-%d').date()
+        
     except ValueError:
-        return jsonify({"error": "잘못된 파라미터 타입입니다."}), 400
+        return jsonify({"error": "잘못된 파라미터 타입 또는 날짜 형식입니다."}), 400
 
     try:
-        time_slot_status = get_all_10_min_slots()
+        time_slot_status = get_all_10_min_slots() # {"07:00": True, ...}
+        
+        # [수정] date 객체로 쿼리
         bookings = Booking.query.filter(
             Booking.space_id == room_id,
-            Booking.date == date,
+            Booking.date == date_obj,
             Booking.status != '취소'
         ).all()
 
         if bookings:
-            for slot_time in time_slot_status:
+            # [수정] _calculate_booked_slots_count와 동일한 로직으로 비교
+            for slot_time_str in time_slot_status:
+                slot_time_obj = datetime.strptime(slot_time_str, '%H:%M').time()
                 for booking in bookings:
-                    if slot_time >= booking.start_time and slot_time < booking.end_time:
-                        time_slot_status[slot_time] = False
+                    if slot_time_obj >= booking.start_time and slot_time_obj < booking.end_time:
+                        time_slot_status[slot_time_str] = False
                         break 
                         
         return jsonify(time_slot_status), 200
@@ -158,15 +182,26 @@ def get_daily_availability():
 @space_bp.route("/spaces/available", methods=['GET'])
 def get_available_spaces_for_time():
     try:
-        date = request.args.get('date', type=str)
-        start_time = request.args.get('start', type=str)
-        end_time = request.args.get('end', type=str)
+        # [수정] 문자열(String) 변수임을 명시
+        date_str = request.args.get('date', type=str)
+        start_time_str = request.args.get('start', type=str)
+        end_time_str = request.args.get('end', type=str)
 
-        if not all([date, start_time, end_time]):
+        if not all([date_str, start_time_str, end_time_str]):
             return jsonify({"error": "date, start, end는 필수 파라미터입니다."}), 400
+
+        # --- [!!! 핵심 수정 !!!] ---
+        # 쿼리를 위해 문자열을 date/time 객체로 파싱
+        try:
+            date_obj = datetime.strptime(date_str, '%Y-%m-%d').date()
+            start_obj = datetime.strptime(start_time_str, '%H:%M').time()
+            end_obj = datetime.strptime(end_time_str, '%H:%M').time()
+        except ValueError:
+            return jsonify({"error": "잘못된 날짜 또는 시간 형식입니다. (YYYY-MM-DD, HH:MM)"}), 400
         
-        if start_time >= end_time:
+        if start_obj >= end_obj:
             return jsonify({"error": "시작 시간은 종료 시간보다 빨라야 합니다."}), 400
+        # --- 수정 끝 ---
 
     except Exception as e:
         return jsonify({"error": "잘못된 파라미터입니다.", "details": str(e)}), 400
@@ -175,11 +210,11 @@ def get_available_spaces_for_time():
         # 1. 해당 시간에 겹치는 예약이 있는 space_id 목록을 찾음
         conflicting_bookings_query = db.session.query(Booking.space_id)\
             .filter(
-                Booking.date == date,
+                Booking.date == date_obj, # date 객체로 비교
                 Booking.status != '취소',
                 and_(
-                    Booking.start_time < end_time,   # 요청 시작 < 예약 끝
-                    Booking.end_time > start_time    # 요청 끝 > 예약 시작
+                    Booking.start_time < end_obj,   # time 객체로 비교
+                    Booking.end_time > start_obj    # time 객체로 비교
                 )
             )\
             .distinct()
