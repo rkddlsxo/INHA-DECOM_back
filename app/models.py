@@ -1,30 +1,28 @@
-from app import db # app.py에서 만든 db 객체를 가져옵니다.
+from app import db, bcrypt # bcrypt를 app에서 import 합니다.
 from datetime import datetime
-# ❗️ 비밀번호 해싱을 위해 import (회원가입/로그인 로직에서 사용)
 # from werkzeug.security import generate_password_hash, check_password_hash
 
 class User(db.Model):
     __tablename__ = 'user'
     
     id = db.Column(db.String(8), primary_key=True) # 학번
-    username = db.Column(db.String(80), unique=True, nullable=False)
-    password = db.Column(db.String(200), nullable=False) # ⭐️ 해시된 비밀번호를 저장해야 합니다.
+    # [수정] unique=True를 unique=False (또는 생략)로 변경하여 동명이인 허용
+    username = db.Column(db.String(80), unique=False, nullable=False)
+    password = db.Column(db.String(200), nullable=False) # 해시된 비밀번호가 저장됩니다.
 
-    # ⭐️ 관계 설정: User가 삭제되어도 예약 내역은 남길 수 있습니다 (cascade="all, delete-orphan"은 제외)
-    # 'user'는 Booking 모델에서 User 객체를 .user로 접근할 때 사용됩니다.
+    # 관계 설정: User가 삭제되어도 예약 내역은 남길 수 있습니다.
     bookings = db.relationship('Booking', backref='user', lazy=True)
     complaints = db.relationship('Complaint', backref='user', lazy=True)
 
     def __init__(self, id, username, password):
         self.id = id
         self.username = username
-        # ⭐️ 실제로는 해시된 비밀번호를 저장해야 합니다.
-        # self.password = generate_password_hash(password) 
-        self.password = password # (임시로 평문 저장, 보안에 취약)
+        # [수정] 객체 생성 시 비밀번호를 즉시 해시하여 저장합니다.
+        self.password = bcrypt.generate_password_hash(password).decode('utf-8') 
 
-    # ⭐️ 로그인 시 비밀번호 검증 메서드 (예시)
-    # def check_password(self, password):
-    #    return check_password_hash(self.password, password)
+    # [수정] 로그인 시 비밀번호 검증 메서드
+    def check_password(self, password):
+       return bcrypt.check_password_hash(self.password, password)
 
 
 class Space(db.Model):
@@ -42,7 +40,7 @@ class Space(db.Model):
     latitude = db.Column(db.Float, nullable=True)           #위도 추가
     longitude = db.Column(db.Float, nullable=True)          #경도 추가
     
-    # ⭐️ Space가 삭제되면 관련 예약 내역도 삭제 (필요에 따라 정책 변경)
+    # Space가 삭제되면 관련 예약 내역도 삭제 (필요에 따라 정책 변경)
     bookings = db.relationship('Booking', backref='space', lazy=True, cascade="all, delete-orphan")
     complaints = db.relationship('Complaint', backref='space', lazy=True)
 
@@ -64,12 +62,12 @@ class Booking(db.Model):
     
     id = db.Column(db.Integer, primary_key=True) # 예약 고유 ID
 
-    # ⭐️ 외래 키: User, Space 테이블과 연결
+    # 외래 키: User, Space 테이블과 연결
     user_id = db.Column(db.String(8), db.ForeignKey('user.id'), nullable=False)
     space_id = db.Column(db.Integer, db.ForeignKey('space.id'), nullable=False)
 
     # 1. 예약 시간 정보 (Front-end의 tempBookingData)
-    # ⭐️ 날짜는 YYYY-MM-DD, 시간은 HH:MM 형식으로 저장 (정렬 및 쿼리 용이)
+    # 날짜는 YYYY-MM-DD, 시간은 HH:MM 형식으로 저장 (정렬 및 쿼리 용이)
     date = db.Column(db.String(10), nullable=False)
     start_time = db.Column(db.String(5), nullable=False)
     end_time = db.Column(db.String(5), nullable=False)
@@ -117,7 +115,7 @@ class Complaint(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow) # 작성 시간
     status = db.Column(db.String(20), default='접수') # '접수', '처리중', '완료'
 
-    # ⭐️ 외래 키: 누가, 어느 장소를 제보했는지 (선택적)
+    # 외래 키: 누가, 어느 장소를 제보했는지 (선택적)
     user_id = db.Column(db.String(8), db.ForeignKey('user.id'), nullable=True) # 익명 제보 가능
     space_id = db.Column(db.Integer, db.ForeignKey('space.id'), nullable=True) # 특정 장소 지정
 

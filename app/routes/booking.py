@@ -5,6 +5,7 @@ from flask_jwt_extended import jwt_required, get_jwt_identity
 from datetime import datetime, timedelta
 import pytz
 from geopy.distance import geodesic #위치 정보 가져오기 위해 geopy import
+from sqlalchemy.sql import and_ # and_ 함수를 import합니다.
 
 # 'booking_bp' (booking blueprint) 라는 이름으로 새 블루프린트 생성
 booking_bp = Blueprint('booking', __name__, url_prefix='/api')
@@ -53,20 +54,44 @@ def create_booking():
     current_user_id = get_jwt_identity()
 
     try:
+        # --- 1. 요청에서 모든 주요 정보를 변수로 추출 ---
         room_name = data.get('roomName')
         room_location = data.get('roomLocation')
-        
+        date = data.get('date')
+        start_time = data.get('startTime')
+        end_time = data.get('endTime')
+
+        # --- 2. Space 찾기 (기존과 동일) ---
         space = Space.query.filter_by(name=room_name, location=room_location).first()
 
         if not space:
             return jsonify({"error": f"장소를 찾을 수 없습니다: {room_name} ({room_location})"}), 404
         
+        # --- 3. 중복 예약 검사 로직 추가 ---
+        conflicting_booking = Booking.query.filter(
+            Booking.space_id == space.id,
+            Booking.date == date,
+            Booking.status != '취소', # 취소된 예약은 겹쳐도 됨
+            and_(
+                Booking.start_time < end_time,   # (기존 예약) 10:00 < (신규) 11:00
+                Booking.end_time > start_time    # (기존 예약) 12:00 > (신규) 10:00
+            )
+        ).first() # 겹치는 예약이 하나라도 있는지 확인
+
+        # 겹치는 예약이 있다면 409 Conflict 반환
+        if conflicting_booking:
+            return jsonify({
+                "error": "해당 시간대에 이미 다른 예약이 존재합니다.",
+                "details": f"기존 예약: {conflicting_booking.start_time}~{conflicting_booking.end_time}"
+            }), 409
+
+        # --- 4. 중복이 없을 경우에만 예약 생성 ---
         new_booking = Booking(
             user_id=current_user_id,
             space_id=space.id,
-            date=data.get('date'),
-            start_time=data.get('startTime'),
-            end_time=data.get('endTime'),
+            date=date, # data.get('date') 대신 변수 사용
+            start_time=start_time, # data.get('startTime') 대신 변수 사용
+            end_time=end_time, # data.get('endTime') 대신 변수 사용
             organizationType=data.get('organizationType'),
             organizationName=data.get('applicant'),
             phone=data.get('phone'),
@@ -177,15 +202,17 @@ def check_in_booking():
     allowed_start_time_limit = (current_time_kst + timedelta(minutes=15)).strftime("%H:%M")
 
     try:
-        #2. 사용자 ID와 장소 ID로 예약을 먼저 찾음
+        #2. 사용자 ID, 장소 ID, *그리고 오늘 날짜*로 예약을 찾음
         booking = Booking.query.filter(
             Booking.user_id == current_user_id,
-            Booking.space_id == space_id
+            Booking.space_id == space_id,
+            Booking.date == current_date_str  # 오늘 날짜 조건 추가
         ).first()
 
         # [실패 1] 예약 자체가 존재하지 않음
         if not booking:
-            return jsonify({"error": f"해당 장소({space_id})에 대한 예약 내역이 없습니다."}), 404
+            # 에러 메시지를 더 명확하게 변경
+            return jsonify({"error": f"오늘({current_date_str}) 해당 장소({space_id})에 대한 예약 내역이 없습니다."}), 404
 
         #3. 예약이 존재하므로, 위치(추가), 상태 및 시간 검증
 
@@ -207,8 +234,7 @@ def check_in_booking():
                 }), 403 # 403 Forbidden
 
         # [성공 1] 이미 체크인한 경우 (새로고침)
-        # 오늘 날짜이고, 상태가 '이용중'이거나 check_in_time이 이미 기록됨
-        if booking.date == current_date_str and (booking.status == '이용중' or booking.check_in_time):
+        if booking.status == '이용중' or booking.check_in_time:
             return jsonify({
                 "message": "이미 체크인되었습니다.",
                 "user_name": booking.user.username,
@@ -217,7 +243,7 @@ def check_in_booking():
                 "end_time": booking.end_time
             }), 200
 
-        # [실패 2] 날짜 불일치
+        # [실패 2] 날짜 불일치 (쿼리 수정으로 인해 실행될 가능성 낮음)
         if booking.date != current_date_str:
             return jsonify({"error": f"예약 날짜가 오늘({current_date_str})이 아닙니다. (예약: {booking.date})"}), 403
         
