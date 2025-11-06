@@ -46,7 +46,58 @@ def _calculate_booked_slots_count(bookings_for_day, all_slots_template):
     booked_count = sum(1 for status in time_slot_status.values() if not status)
     return booked_count
 
-#  API 1: 모든 장소 목록 
+# ⭐️ [신규] 시간대별(오전/오후/저녁) 상태 계산 함수
+def _calculate_period_status(bookings_for_day, all_slots_template):
+    """
+    오전(07:00-12:00), 오후(12:00-17:00), 저녁(17:00-22:00)의
+    예약 상태(available, partial, booked)를 계산합니다.
+    """
+    periods = {
+        "morning": {"start": time(7, 0), "end": time(12, 0), "total_slots": 0, "booked_slots": 0},
+        "afternoon": {"start": time(12, 0), "end": time(17, 0), "total_slots": 0, "booked_slots": 0},
+        "evening": {"start": time(17, 0), "end": time(22, 0), "total_slots": 0, "booked_slots": 0}
+    }
+    
+    # 1. 각 시간대별 총 슬롯 수 계산
+    for slot_str in all_slots_template:
+        slot_time = datetime.strptime(slot_str, '%H:%M').time()
+        for period, data in periods.items():
+            if data["start"] <= slot_time < data["end"]:
+                data["total_slots"] += 1
+                break
+                
+    # 2. 예약된 슬롯 수 계산 (bookings_for_day가 비어있으면 이 루프는 스킵됨)
+    if bookings_for_day:
+        for slot_str in all_slots_template:
+            slot_time = datetime.strptime(slot_str, '%H:%M').time()
+            is_booked = False
+            for booking in bookings_for_day:
+                if booking.start_time <= slot_time < booking.end_time:
+                    is_booked = True
+                    break
+            
+            if is_booked:
+                for period, data in periods.items():
+                    if data["start"] <= slot_time < data["end"]:
+                        data["booked_slots"] += 1
+                        break
+
+    # 3. 상태 결정
+    result = {}
+    for period, data in periods.items():
+        if data["booked_slots"] == 0:
+            result[period] = "available"
+        elif data["total_slots"] > 0 and data["booked_slots"] >= data["total_slots"]:
+            result[period] = "booked"
+        elif data["booked_slots"] > 0:
+            result[period] = "partial"
+        else: # total_slots == 0 (이론상 발생 안 함)
+            result[period] = "available"
+            
+    return result
+
+
+#  ⭐️ [수정됨] API 1: 모든 장소 목록 (빠져있던 것을 다시 추가)
 @space_bp.route("/masters/spaces", methods=['GET'])
 def get_master_spaces():
     try:
@@ -66,7 +117,7 @@ def get_master_spaces():
         return jsonify({"error": "장소 목록 조회 중 오류 발생", "details": str(e)}), 500
 
 
-#  API 2: 월별 현황 (달력) 
+#  ⭐️ [수정됨] API 2: 월별 현황 (달력) - period_status 추가
 @space_bp.route("/availability/monthly", methods=['GET'])
 def get_monthly_availability():
     try:
@@ -108,6 +159,9 @@ def get_monthly_availability():
             day_bookings = bookings_by_day.get(date_key, [])
             booked_count = _calculate_booked_slots_count(day_bookings, all_slots_template)
             
+            # ⭐️ [신규] 시간대별 상태 계산
+            period_status = _calculate_period_status(day_bookings, all_slots_template)
+            
             percentage = 0.0
             status = "available"
             
@@ -121,7 +175,8 @@ def get_monthly_availability():
             
             availability_data[date_key] = {
                 "status": status,
-                "percentage": percentage 
+                "percentage": percentage,
+                "period_status": period_status # ⭐️ [신규] 응답에 추가
             }
             
         return jsonify(availability_data), 200
