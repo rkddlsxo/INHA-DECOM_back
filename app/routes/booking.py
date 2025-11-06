@@ -25,6 +25,8 @@ def get_my_bookings():
         for booking, space in bookings_query:
             results.append({
                 "id": booking.id,
+                # --- ⭐️ [수정] 재예약 기능을 위해 space_id 추가 ---
+                "space_id": booking.space_id,
                 # --- [!!! 핵심 수정 !!!] ---
                 # Date/Time 객체를 JSON으로 보내기 위해 문자열로 포맷팅
                 "date": booking.date.isoformat(), # 예: "2025-11-05"
@@ -40,7 +42,9 @@ def get_my_bookings():
                 "numPeople": booking.num_people,
                 "acUse": booking.ac_use,
                 "status": booking.status,
-                "cancelReason": booking.cancel_reason
+                "cancelReason": booking.cancel_reason,
+                # ⭐️ [추가] 재예약 폼 자동 완성을 위해 organizationType 추가
+                "organizationType": booking.organizationType 
             })
         return jsonify(results), 200
     except Exception as e:
