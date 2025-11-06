@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, time
 import pytz
 from geopy.distance import geodesic 
 from sqlalchemy.sql import and_ 
+from sqlalchemy.exc import OperationalError # ⭐️ 1. 락(Lock) 오류 처리를 위해 import 추가
 
 booking_bp = Blueprint('booking', __name__, url_prefix='/api')
 
@@ -46,12 +47,14 @@ def get_my_bookings():
         return jsonify({"error": "예약 내역 조회 중 오류 발생", "details": str(e)}), 500
 
 
+# ⭐️ 2. create_booking 함수 전체가 트랜잭션 락을 사용하도록 수정됨
 @booking_bp.route("/bookings", methods=['POST'])
 @jwt_required()
 def create_booking():
     data = request.get_json()
     current_user_id = get_jwt_identity()
 
+    # --- 1. 예약 정보 파싱 (Try-except 블록을 분리) ---
     try:
         room_name = data.get('roomName')
         room_location = data.get('roomLocation')
@@ -64,7 +67,6 @@ def create_booking():
         if not space:
             return jsonify({"error": f"장소를 찾을 수 없습니다: {room_name} ({room_location})"}), 404
         
-       
         try:
             date_obj = datetime.strptime(date_str, '%Y-%m-%d').date()
             start_obj = datetime.strptime(start_time_str, '%H:%M').time()
@@ -72,9 +74,24 @@ def create_booking():
         except ValueError:
             return jsonify({"error": "잘못된 날짜 또는 시간 형식입니다. (YYYY-MM-DD, HH:MM)"}), 400
 
-        # 중복 예약 검사 
-        conflicting_booking = Booking.query.filter(
-            Booking.space_id == space.id,
+    except Exception as e:
+        return jsonify({"error": "입력 데이터 파싱 중 오류 발생", "details": str(e)}), 400
+
+
+    # --- 2. 락(Lock)을 사용한 트랜잭션 처리 (핵심 수정) ---
+    try:
+        # 2-1. 트랜잭션 시작 및 예약할 'Space' 리소스에 락(Lock)을 겁니다.
+        #      (Pessimistic Locking)
+        #      이 쿼리가 실행되면, 이 트랜잭션이 commit/rollback 될 때까지
+        #      다른 요청은 이 space.id에 대해 with_for_update()를 사용할 수 없습니다.
+        locked_space = db.session.query(Space).filter_by(id=space.id).with_for_update().first()
+        
+        if not locked_space:
+            raise Exception("Space 리소스를 찾을 수 없거나 락을 걸 수 없습니다.")
+
+        # 2-2. 락을 획득한 상태에서 중복 예약을 검사합니다. (Check)
+        conflicting_booking = db.session.query(Booking).filter(
+            Booking.space_id == locked_space.id,
             Booking.date == date_obj, 
             Booking.status != '취소',
             and_(
@@ -84,15 +101,17 @@ def create_booking():
         ).first() 
 
         if conflicting_booking:
+            # 중복이 발견되면 롤백하고(락 해제) 에러 반환
+            db.session.rollback()
             return jsonify({
                 "error": "해당 시간대에 이미 다른 예약이 존재합니다.",
-                
                 "details": f"기존 예약: {conflicting_booking.start_time.strftime('%H:%M')}~{conflicting_booking.end_time.strftime('%H:%M')}"
             }), 409
         
+        # 2-3. 중복이 없으므로 예약을 생성합니다. (Act)
         new_booking = Booking(
             user_id=current_user_id,
-            space_id=space.id,
+            space_id=locked_space.id,
             date=date_str, 
             start_time=start_time_str, 
             end_time=end_time_str, 
@@ -105,15 +124,22 @@ def create_booking():
             ac_use=data.get('acUse'),
             status=data.get('status', '확정대기')
         )
-
         db.session.add(new_booking)
+        
+        # 2-4. DB에 최종 반영(commit)하고 락을 해제합니다.
         db.session.commit()
         
         return jsonify({"message": "예약이 성공적으로 접수되었습니다.", "bookingId": new_booking.id}), 201
 
-    except Exception as e:
+    except OperationalError as e:
+        # ⭐️ 3. 락 획득 실패, 데드락 등 DB 동시성 오류 처리
         db.session.rollback()
-        return jsonify({"error": "예약 처리 중 오류 발생", "details": str(e)}), 500
+        return jsonify({"error": "예약 경쟁 실패: 다른 사용자가 동시에 예약 중입니다. 잠시 후 다시 시도해주세요.", "details": str(e)}), 503 # 503 Service Unavailable
+    
+    except Exception as e:
+        # 2-5. 그 외 모든 오류 발생 시 롤백하고 락을 해제합니다.
+        db.session.rollback()
+        return jsonify({"error": "예약 트랜잭션 중 심각한 오류 발생", "details": str(e)}), 500
 
 
 @booking_bp.route("/bookings/<int:booking_id>/cancel", methods=['PATCH'])
