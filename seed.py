@@ -1,7 +1,6 @@
 from app import create_app, db
 from app.models import Space, Booking
 
-# 프론트엔드 코드(TimeFocusSelectPage.jsx)의 카테고리 분류를 따릅니다.
 # (카테고리: 서브카테고리)
 CATEGORY_MAP = {
     '인문 스터디룸': '스터디룸',
@@ -81,20 +80,20 @@ def initialize_spaces():
     app = create_app()
     with app.app_context():
         try:
-            #기존 Booking 데이터 또한 초기화 (Space에 dependency)
+            
             print("INFO: 기존 예약(Booking) 데이터를 모두 삭제합니다...")
             db.session.query(Booking).delete()
 
-            # 1. 기존의 모든 Space 데이터를 삭제 (초기화)
+            
             print("INFO: 기존 장소(Space) 데이터를 모두 삭제합니다...")
             db.session.query(Space).delete()
             
-            # 2. 새 데이터 리스트 생성
+            
             spaces_to_add = []
             for name, sub_cat, loc, cap in spaces_data:
-                category = CATEGORY_MAP.get(sub_cat, '기타') # 맵에서 메인 카테고리 찾기
+                category = CATEGORY_MAP.get(sub_cat, '기타')
                 
-                # 좌표 찾기 추가
+          
                 coords = COORDINATE_MAP.get(sub_cat)
                 lat, lng = (None, None)
                 if coords:
@@ -106,16 +105,16 @@ def initialize_spaces():
                     subCategory=sub_cat,
                     location=loc,
                     capacity=cap,
-                    latitude=lat,     # 위도, 경도 전달
+                    latitude=lat,    
                     longitude=lng
                 )
                 spaces_to_add.append(new_space)
             
-            # 3. DB에 일괄 추가
+           
             print(f"INFO: 총 {len(spaces_to_add)}개의 새 장소 데이터를 추가합니다...")
             db.session.add_all(spaces_to_add)
             
-            # 4. 커밋 (최종 저장)
+            
             db.session.commit()
             print("SUCCESS: 장소 데이터베이스가 성공적으로 초기화되었습니다.")
 
@@ -123,6 +122,6 @@ def initialize_spaces():
             db.session.rollback()
             print(f"ERROR: 데이터 초기화 중 오류 발생 - {e}")
 
-# 이 스크립트를 직접 실행할 때만 함수가 호출되도록
+
 if __name__ == '__main__':
     initialize_spaces()
