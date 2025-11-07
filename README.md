@@ -96,6 +96,14 @@ export MAIL_USERNAME="<내Gmail@gmail.com>"
 export MAIL_PASSWORD="<Gmail_16자리_앱_비밀번호>"
 ```
 
+### 4-1. (필수) 데이터베이스(스키마) 수동 생성
+`run.py` 또는 `seed.py`를 실행하기 전, MySQL에 접속하여 `decom` 데이터베이스를 수동으로 생성해야 합니다.
+
+(예: MySQL 워크벤치 또는 터미널에서 아래 명령어 실행)
+```sql
+CREATE DATABASE decom CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;
+```
+
 ### 5. 데이터베이스 초기화
 
 ```bash
