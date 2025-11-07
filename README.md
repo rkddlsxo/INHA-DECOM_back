@@ -165,7 +165,7 @@ Gmail 앱 비밀번호: MAIL_PASSWORD는 실제 Gmail 비밀번호가 아닌, 'G
 ```
 MIT License
 
-Copyright (c) 2024 MailPilot AI Team
+Copyright (c) 2025 rkddlsxo
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
