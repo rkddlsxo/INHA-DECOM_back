@@ -1,3 +1,7 @@
+import os
+from urllib.parse import urlparse
+from sqlalchemy import create_engine
+from sqlalchemy.exc import OperationalError
 from app import create_app, db
 from app.models import Space, Booking
 
@@ -11,7 +15,7 @@ CATEGORY_MAP = {
     '테니스 코트': '테니스 코트',
     '농구장': '농구장',
     '풋살파크': '풋살파크',
-    '피클볼 코트': '피클볼 코트', #오타 수정
+    '피클볼 코트': '피클볼 코트', 
 }
 
 #서브카테고리별 좌표(위도, 경도) 매핑
@@ -76,6 +80,39 @@ spaces_data = [
     ('피클볼 5코트', '피클볼 코트', '피클볼장', 4),
 ]
 
+def create_database_if_not_exists():
+    """
+    환경 변수의 DATABASE_URI를 파싱하여,
+    'decom' 데이터베이스가 존재하지 않으면 자동으로 생성합니다.
+    """
+    try:
+        
+        uri_str = os.environ.get('DATABASE_URI') or 'mysql+pymysql://root@localhost/decom'
+        
+        
+        parsed_uri = urlparse(uri_str)
+        db_name = parsed_uri.path[1:] 
+        
+        admin_uri = f"{parsed_uri.scheme}://{parsed_uri.netloc}"
+        
+        engine = create_engine(admin_uri)
+        
+        with engine.connect() as conn:
+            conn.execute(f"CREATE DATABASE IF NOT EXISTS {db_name} CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci")
+            print(f"INFO: 데이터베이스 '{db_name}'가 준비되었습니다.")
+            
+    except ImportError:
+        print("ERROR: SQLAlchemy 또는 PyMySQL이 설치되지 않았습니다. (pip install SQLAlchemy PyMySQL)")
+        exit(1)
+    except OperationalError as e:
+        print(f"ERROR: DB 서버 연결 실패. MySQL 서버가 실행 중인지, 환경 변수(DATABASE_URI)가 올바른지 확인하세요.")
+        print(f"DETAILS: {e}")
+        exit(1) 
+    except Exception as e:
+        print(f"ERROR: 데이터베이스 자동 생성 중 알 수 없는 오류 발생: {e}")
+        exit(1)
+
+
 def initialize_spaces():
     app = create_app()
     with app.app_context():
@@ -124,4 +161,6 @@ def initialize_spaces():
 
 
 if __name__ == '__main__':
+    create_database_if_not_exists()
+    
     initialize_spaces()
