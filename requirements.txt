@@ -1,0 +1,11 @@
+Flask
+Flask-SQLAlchemy
+Flask-Migrate
+Flask-Bcrypt
+Flask-JWT-Extended
+Flask-CORS
+Flask-APScheduler
+Flask-Mail
+geopy
+pytz
+PyMySQL

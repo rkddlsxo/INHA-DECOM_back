@@ -13,6 +13,7 @@ jwt = JWTManager()
 migrate = Migrate()
 mail = Mail() 
 scheduler = APScheduler() 
+
 def create_app():
     app = Flask(__name__)
     app.config.from_object('config.Config')
@@ -26,8 +27,7 @@ def create_app():
     mail.init_app(app) 
     
     
-    scheduler.init_app(app)
-    scheduler.start()
+    scheduler.init_app(app) 
 
     
     CORS(app, resources={r"/*": {
